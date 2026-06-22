@@ -1,70 +1,83 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import mongoose from 'mongoose';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import mongoose from "mongoose";
+import path from "path";
+import { fileURLToPath } from "url";
 
-import authRoutes from './routes/authRoutes.js';
-import profileRoutes from './routes/profileRoutes.js';
-import recipeRoutes from './routes/recipeRoutes.js';
-import mealPlanRoutes from './routes/mealPlanRoutes.js';
-import favoriteRoutes from './routes/favoriteRoutes.js';
-
+import authRoutes from "./routes/authRoutes.js";
+import profileRoutes from "./routes/profileRoutes.js";
+import recipeRoutes from "./routes/recipeRoutes.js";
+import mealPlanRoutes from "./routes/mealPlanRoutes.js";
+import favoriteRoutes from "./routes/favoriteRoutes.js";
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // Middleware
-app.use(cors({
-  origin: 'http://localhost:5173',
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Static files
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
-  .then(async () => {
-    console.log('✅ MongoDB connected successfully');
-    // Run seeding after connection
+// MongoDB
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log("✅ MongoDB Connected Successfully");
   })
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+  .catch((err) => {
+    console.error("❌ MongoDB Connection Error:", err);
+  });
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/api/recipes', recipeRoutes);
-app.use('/api/mealplans', mealPlanRoutes);
-app.use('/api/favorites', favoriteRoutes);
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'FlavorFusion API is running' });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  res.status(err.status || 500).json({
-    message: err.message || 'Something went wrong!',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+// Root Route
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "FlavorFusion Backend Running",
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+// Health Check
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "FlavorFusion API Running",
+  });
+});
+
+// Routes
+app.use("/api/auth", authRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/recipes", recipeRoutes);
+app.use("/api/mealplans", mealPlanRoutes);
+app.use("/api/favorites", favoriteRoutes);
+
+// 404
+app.use("*", (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
+});
+
+// Error Handler
+app.use((err, req, res, next) => {
+  console.error(err);
+
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
 });
 
 app.listen(PORT, () => {
-  console.log(` FlavorFusion server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });

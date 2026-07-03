@@ -1,28 +1,51 @@
 import axios from "axios";
 
+// ==========================================
+// Axios Instance
+// ==========================================
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "https://flavorfusion-sdlw.onrender.com/api",
+  baseURL:
+    import.meta.env.VITE_API_URL ||
+    "https://flavorfusion-1h18.onrender.com/api",
+  withCredentials: false,
 });
 
-// Add JWT token to every request
+// ==========================================
+// Request Interceptor
+// ==========================================
+
 API.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Handle unauthorized responses
+// ==========================================
+// Response Interceptor
+// ==========================================
+
 API.interceptors.response.use(
-  (response) => response,
+  (response) => response.data,    // 👈  EXTRACT DATA HERE
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const url = error.config?.url || "";
+
+    // Only logout when protected endpoints fail
+    if (
+      status === 401 &&
+      (
+        url.includes("/profile") ||
+        url.includes("/favorites") ||
+        url.includes("/mealplans") ||
+        url.includes("/auth/me")
+      )
+    ) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       window.location.href = "/login";
@@ -32,45 +55,50 @@ API.interceptors.response.use(
   }
 );
 
-export default API;
-
-// =======================
+// ==========================================
 // AUTH
-// =======================
-export const registerUser = (data) => API.post("/auth/register", data);
-export const loginUser = (data) => API.post("/auth/login", data);
-export const getCurrentUser = () => API.get("/auth/me");
+// ==========================================
 
-// =======================
+export const registerUser = (data) =>
+  API.post("/auth/register", data);
+
+export const loginUser = (data) =>
+  API.post("/auth/login", data);
+
+export const getCurrentUser = () =>
+  API.get("/auth/me");
+
+// ==========================================
 // PROFILE
-// =======================
-export const getProfile = () => API.get("/profile");
+// ==========================================
+
+export const getProfile = () =>
+  API.get("/profile");
 
 export const updateProfile = (data) => {
   const formData = new FormData();
-
   Object.keys(data).forEach((key) => {
     if (data[key] !== undefined && data[key] !== null) {
       formData.append(key, data[key]);
     }
   });
-
   return API.put("/profile", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
+    headers: { "Content-Type": "multipart/form-data" },
   });
 };
 
-// =======================
+// ==========================================
 // RECIPES
-// =======================
-export const getRecipes = (params) => API.get("/recipes", { params });
-export const getRecipe = (id) => API.get(`/recipes/${id}`);
+// ==========================================
+
+export const getRecipes = (params = {}) =>
+  API.get("/recipes", { params });
+
+export const getRecipe = (id) =>
+  API.get(`/recipes/${id}`);
 
 export const createRecipe = (data) => {
   const formData = new FormData();
-
   Object.keys(data).forEach((key) => {
     if (data[key] !== undefined && data[key] !== null) {
       if (
@@ -84,17 +112,13 @@ export const createRecipe = (data) => {
       }
     }
   });
-
   return API.post("/recipes", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
+    headers: { "Content-Type": "multipart/form-data" },
   });
 };
 
 export const updateRecipe = (id, data) => {
   const formData = new FormData();
-
   Object.keys(data).forEach((key) => {
     if (data[key] !== undefined && data[key] !== null) {
       if (
@@ -108,34 +132,54 @@ export const updateRecipe = (id, data) => {
       }
     }
   });
-
   return API.put(`/recipes/${id}`, formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
+    headers: { "Content-Type": "multipart/form-data" },
   });
 };
 
-export const deleteRecipe = (id) => API.delete(`/recipes/${id}`);
-export const toggleLike = (id) => API.post(`/recipes/${id}/like`);
+export const deleteRecipe = (id) =>
+  API.delete(`/recipes/${id}`);
+
+export const toggleLike = (id) =>
+  API.post(`/recipes/${id}/like`);
+
 export const rateRecipe = (id, value) =>
   API.post(`/recipes/${id}/rate`, { value });
+
 export const addComment = (id, text) =>
   API.post(`/recipes/${id}/comment`, { text });
 
-// =======================
+// ==========================================
 // FAVORITES
-// =======================
-export const getFavorites = () => API.get("/favorites");
-export const toggleFavorite = (id) => API.post(`/favorites/${id}`);
+// ==========================================
+
+export const getFavorites = () =>
+  API.get("/favorites");
+
+export const toggleFavorite = (id) =>
+  API.post(`/favorites/${id}`);
+
 export const checkFavorite = (id) =>
   API.get(`/favorites/check/${id}`);
 
-// =======================
+// ==========================================
 // MEAL PLANNER
-// =======================
-export const getMealPlans = () => API.get("/mealplans");
-export const createMealPlan = (data) => API.post("/mealplans", data);
-export const deleteMealPlan = (id) => API.delete(`/mealplans/${id}`);
+// ==========================================
+
+export const getMealPlans = () =>
+  API.get("/mealplans");
+
+export const createMealPlan = (data) =>
+  API.post("/mealplans", data);
+
+export const deleteMealPlan = (id) =>
+  API.delete(`/mealplans/${id}`);
+
 export const getShoppingList = () =>
   API.get("/mealplans/shopping-list");
+
+// ==========================================
+// Export Axios Instance
+// ==========================================
+
+export default API;

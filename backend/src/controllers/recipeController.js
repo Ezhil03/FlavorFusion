@@ -1,6 +1,23 @@
 import Recipe from '../models/Recipe.js';
 import User from '../models/User.js';
 
+// ---------- Helper to parse dietary preference ----------
+const parseDietaryPreference = (value) => {
+  if (!value) return ['None'];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      return [parsed];
+    } catch {
+      return [value];
+    }
+  }
+  return ['None'];
+};
+
+// ---------- Create Recipe ----------
 export const createRecipe = async (req, res) => {
   try {
     const {
@@ -19,13 +36,15 @@ export const createRecipe = async (req, res) => {
     // Parse ingredients and steps if they are strings
     let parsedIngredients = ingredients;
     let parsedSteps = steps;
-
     if (typeof ingredients === 'string') {
       parsedIngredients = JSON.parse(ingredients);
     }
     if (typeof steps === 'string') {
       parsedSteps = JSON.parse(steps);
     }
+
+    // Parse dietaryPreference using the helper
+    const parsedDietary = parseDietaryPreference(dietaryPreference);
 
     // Handle uploaded files
     const image = req.files?.image ? `/uploads/images/${req.files.image[0].filename}` : '';
@@ -36,12 +55,14 @@ export const createRecipe = async (req, res) => {
       description,
       cuisine,
       mealType,
-      dietaryPreference: dietaryPreference || ['None'],
-      ingredients: parsedIngredients,
-      steps: parsedSteps.map((step, index) => ({
-        ...step,
-        order: index + 1
-      })),
+      dietaryPreference: parsedDietary,
+      ingredients: parsedIngredients || [],
+      steps: Array.isArray(parsedSteps)
+        ? parsedSteps.map((step, index) => ({
+            ...step,
+            order: index + 1
+          }))
+        : [],
       prepTime: parseInt(prepTime),
       cookTime: parseInt(cookTime),
       servings: parseInt(servings),
@@ -63,6 +84,7 @@ export const createRecipe = async (req, res) => {
   }
 };
 
+// ---------- Get All Recipes (with filters & pagination) ----------
 export const getRecipes = async (req, res) => {
   try {
     const { search, cuisine, mealType, dietary, sort, page = 1, limit = 10 } = req.query;
@@ -136,6 +158,7 @@ export const getRecipes = async (req, res) => {
   }
 };
 
+// ---------- Get Single Recipe by ID ----------
 export const getRecipeById = async (req, res) => {
   try {
     const recipe = await Recipe.findById(req.params.id)
@@ -149,7 +172,7 @@ export const getRecipeById = async (req, res) => {
 
     // Check if current user liked this recipe
     const isLiked = req.user ? recipe.likes.some(id => id.toString() === req.user.id) : false;
-    
+
     // Get user's rating
     let userRating = null;
     if (req.user) {
@@ -168,6 +191,7 @@ export const getRecipeById = async (req, res) => {
   }
 };
 
+// ---------- Update Recipe ----------
 export const updateRecipe = async (req, res) => {
   try {
     const recipe = await Recipe.findById(req.params.id);
@@ -204,6 +228,9 @@ export const updateRecipe = async (req, res) => {
       parsedSteps = JSON.parse(steps);
     }
 
+    // Parse dietaryPreference using the helper
+    const parsedDietary = parseDietaryPreference(dietaryPreference);
+
     // Handle file uploads
     if (req.files?.image) {
       recipe.image = `/uploads/images/${req.files.image[0].filename}`;
@@ -217,12 +244,14 @@ export const updateRecipe = async (req, res) => {
     recipe.description = description || recipe.description;
     recipe.cuisine = cuisine || recipe.cuisine;
     recipe.mealType = mealType || recipe.mealType;
-    recipe.dietaryPreference = dietaryPreference || recipe.dietaryPreference;
+    recipe.dietaryPreference = parsedDietary;
     recipe.ingredients = parsedIngredients || recipe.ingredients;
-    recipe.steps = parsedSteps ? parsedSteps.map((step, index) => ({
-      ...step,
-      order: index + 1
-    })) : recipe.steps;
+    recipe.steps = Array.isArray(parsedSteps)
+      ? parsedSteps.map((step, index) => ({
+          ...step,
+          order: index + 1
+        }))
+      : recipe.steps;
     recipe.prepTime = prepTime ? parseInt(prepTime) : recipe.prepTime;
     recipe.cookTime = cookTime ? parseInt(cookTime) : recipe.cookTime;
     recipe.servings = servings ? parseInt(servings) : recipe.servings;
@@ -240,6 +269,7 @@ export const updateRecipe = async (req, res) => {
   }
 };
 
+// ---------- Delete Recipe ----------
 export const deleteRecipe = async (req, res) => {
   try {
     const recipe = await Recipe.findById(req.params.id);
@@ -262,6 +292,7 @@ export const deleteRecipe = async (req, res) => {
   }
 };
 
+// ---------- Toggle Like ----------
 export const toggleLike = async (req, res) => {
   try {
     const recipe = await Recipe.findById(req.params.id);
@@ -291,6 +322,7 @@ export const toggleLike = async (req, res) => {
   }
 };
 
+// ---------- Rate Recipe ----------
 export const rateRecipe = async (req, res) => {
   try {
     const { value } = req.body;
@@ -323,6 +355,7 @@ export const rateRecipe = async (req, res) => {
   }
 };
 
+// ---------- Add Comment ----------
 export const addComment = async (req, res) => {
   try {
     const { text } = req.body;

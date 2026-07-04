@@ -24,30 +24,50 @@ const __dirname = path.dirname(__filename);
 ============================ */
 
 const allowedOrigins = [
-    "http://localhost:5173",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://flavorfusionff123.netlify.app",
+  "https://flavorfusionff.netlify.app",
   "https://flavorfusionnew.netlify.app",
 ];
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (Postman, mobile apps)
-      if (!origin) return callback(null, true);
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests without origin (Postman, curl)
+    if (!origin) {
+      return callback(null, true);
+    }
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+    console.log("❌ Blocked by CORS:", origin);
+    return callback(new Error("Origin not allowed by CORS"));
+  },
 
-// Handle preflight requests
-app.options("*", cors());
+  credentials: true,
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization",
+  ],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 /* ============================
    Middleware
@@ -91,7 +111,7 @@ app.use("/api/mealplans", mealPlanRoutes);
 app.use("/api/favorites", favoriteRoutes);
 
 /* ============================
-   404
+   404 Handler
 ============================ */
 
 app.use((req, res) => {
@@ -102,11 +122,11 @@ app.use((req, res) => {
 });
 
 /* ============================
-   Error Handler
+   Global Error Handler
 ============================ */
 
 app.use((err, req, res, next) => {
-  console.error(err);
+  console.error("🔥 Error:", err);
 
   res.status(err.status || 500).json({
     success: false,
@@ -115,7 +135,7 @@ app.use((err, req, res, next) => {
 });
 
 /* ============================
-   MongoDB
+   MongoDB Connection
 ============================ */
 
 async function startServer() {

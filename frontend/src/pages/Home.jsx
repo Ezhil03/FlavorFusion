@@ -43,8 +43,9 @@ function Home() {
       });
       
       const response = await getRecipes(params);
-      setRecipes(response.data.recipes);
-      setPagination(response.data.pagination);
+      console.log("API Response:", response);
+      setRecipes(response.recipes);
+      setPagination(response.pagination);
       setError(null);
     } catch (err) {
       console.error('Error fetching recipes:', err);

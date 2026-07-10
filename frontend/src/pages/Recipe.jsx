@@ -1,15 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getRecipe, toggleLike, rateRecipe, addComment } from '../api/api';
-import { toggleFavorite, checkFavorite } from '../api/api';
+import {
+  getRecipe,
+  toggleLike,
+  rateRecipe,
+  addComment,
+  toggleFavorite,
+  checkFavorite,
+  deleteRecipe,
+} from '../api/api';
 import RatingStars from '../components/RatingStars';
 import CommentSection from '../components/CommentSection';
 import Loader from '../components/Loader';
-import { 
-  Heart, 
-  Clock, 
-  Users, 
-  ChefHat, 
+import {
+  Heart,
+  Clock,
+  Users,
+  ChefHat,
   ArrowLeft,
   Share2,
   Edit,
@@ -17,12 +24,18 @@ import {
   Star,
   Play,
   Bookmark,
-  BookmarkCheck
+  BookmarkCheck,
 } from 'lucide-react';
+
+const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
+
+const PLACEHOLDER_IMAGE =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-size='60' text-anchor='middle' dy='.3em' fill='%239ca3af'%3E🍽️%3C/text%3E%3C/svg%3E";
 
 function Recipe() {
   const { id } = useParams();
   const navigate = useNavigate();
+
   const [recipe, setRecipe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -36,36 +49,69 @@ function Recipe() {
   const isAuthenticated = !!localStorage.getItem('token');
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
 
-  const fetchRecipe = async () => {
+  // Memoized values for performance
+  const imageUrl = useMemo(
+    () => (recipe?.image ? `${BASE_URL}${recipe.image}` : PLACEHOLDER_IMAGE),
+    [recipe?.image]
+  );
+  const videoUrl = useMemo(
+    () => (recipe?.video ? `${BASE_URL}${recipe.video}` : ''),
+    [recipe?.video]
+  );
+  const displayRating = useMemo(
+    () =>
+      recipe?.averageRating != null
+        ? Number(recipe.averageRating).toFixed(1)
+        : 'No ratings',
+    [recipe?.averageRating]
+  );
+
+  const fetchRecipe = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await getRecipe(id);
-      const data = response.data;
-      setRecipe(data);
-      setIsLiked(data.isLiked || false);
-      setLikesCount(data.likes?.length || 0);
-      setUserRating(data.userRating || null);
-      
-      // Check if favorite
+      setError(null);
+
+      const requests = [getRecipe(id)];
       if (isAuthenticated) {
-        try {
-          const favResponse = await checkFavorite(id);
-          setIsFavorite(favResponse.data.isFavorite);
-        } catch (e) {
-          // Ignore
+        requests.push(checkFavorite(id));
+      }
+
+      const results = await Promise.allSettled(requests);
+      const recipeResult = results[0];
+
+      if (recipeResult.status === 'rejected') {
+        throw recipeResult.reason;
+      }
+
+      const recipeData = recipeResult.value;
+      if (!recipeData || !recipeData._id) {
+        throw new Error('Recipe not found');
+      }
+
+      setRecipe(recipeData);
+      setIsLiked(recipeData.isLiked || false);
+      setLikesCount(recipeData.likes?.length || 0);
+      setUserRating(recipeData.userRating || null);
+
+      if (isAuthenticated && results[1]) {
+        const favResult = results[1];
+        if (favResult.status === 'fulfilled') {
+          setIsFavorite(favResult.value.isFavorite);
         }
       }
+
+      setError(null);
     } catch (err) {
-      console.error('Error fetching recipe:', err);
-      setError('Recipe not found');
+      console.error('❌ Error fetching recipe:', err);
+      setError(err.response?.status === 404 ? 'Recipe not found' : 'Unable to load recipe.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [id, isAuthenticated]);
 
   useEffect(() => {
     fetchRecipe();
-  }, [id]);
+  }, [fetchRecipe]);
 
   const handleLike = async () => {
     if (!isAuthenticated) {
@@ -74,8 +120,17 @@ function Recipe() {
     }
     try {
       const response = await toggleLike(id);
-      setIsLiked(response.data.isLiked);
-      setLikesCount(response.data.likes);
+      const data = response.data;
+      setIsLiked(data.isLiked);
+      const newCount = Array.isArray(data.likes) ? data.likes.length : data.likes;
+      setLikesCount(newCount);
+
+      setRecipe((prev) => ({
+        ...prev,
+        likes: data.isLiked
+          ? [...(prev.likes || []), currentUser.id]
+          : (prev.likes || []).filter((uid) => uid.toString() !== currentUser.id),
+      }));
     } catch (err) {
       console.error('Error toggling like:', err);
     }
@@ -87,28 +142,41 @@ function Recipe() {
       return;
     }
     try {
-      const response = await rateRecipe(id, value);
+      await rateRecipe(id, value);
       setUserRating(value);
-      setRecipe(prev => ({
-        ...prev,
-        averageRating: response.data.averageRating,
-        ratings: [...(prev.ratings || []), { user: { _id: currentUser.id }, value }]
-      }));
+      await fetchRecipe();
     } catch (err) {
       console.error('Error rating:', err);
     }
   };
 
+  // ✅ FIXED: Optimistic favorite toggle
   const handleFavorite = async () => {
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
+
+    // 1. Save previous state and toggle optimistically
+    const previousState = isFavorite;
+    setIsFavorite(!isFavorite);
+
     try {
-      await toggleFavorite(id);
-      setIsFavorite(!isFavorite);
+      // 2. Call the API
+      const res = await toggleFavorite(id);
+
+      // 3. Extract the new favorite status (handles both `res.isFavorite` and `res.data.isFavorite`)
+      const newFavoriteStatus = res.isFavorite ?? res.data?.isFavorite;
+
+      // 4. If the server returned a value, update the state (in case of race or mismatch)
+      if (newFavoriteStatus !== undefined && newFavoriteStatus !== !previousState) {
+        setIsFavorite(newFavoriteStatus);
+      }
     } catch (err) {
+      // 5. Revert on error
+      setIsFavorite(previousState);
       console.error('Error toggling favorite:', err);
+      alert('Failed to update favorites. Please try again.');
     }
   };
 
@@ -116,11 +184,8 @@ function Recipe() {
     if (!isAuthenticated) return;
     try {
       setIsAddingComment(true);
-      const response = await addComment(id, text);
-      setRecipe(prev => ({
-        ...prev,
-        comments: [...(prev.comments || []), response.data.comment]
-      }));
+      await addComment(id, text);
+      await fetchRecipe();
     } catch (err) {
       console.error('Error adding comment:', err);
     } finally {
@@ -131,7 +196,6 @@ function Recipe() {
   const handleDelete = async () => {
     if (!window.confirm('Are you sure you want to delete this recipe?')) return;
     try {
-      const { deleteRecipe } = await import('../api/api');
       await deleteRecipe(id);
       navigate('/');
     } catch (err) {
@@ -145,18 +209,31 @@ function Recipe() {
     return (
       <div className="max-w-7xl mx-auto px-4 py-16 text-center">
         <p className="text-2xl text-red-500">{error}</p>
-        <Link to="/" className="btn-primary mt-4 inline-block">Go Home</Link>
+        <Link to="/" className="btn-primary mt-4 inline-block">
+          Go Home
+        </Link>
       </div>
     );
   }
-  if (!recipe) return null;
+  if (!recipe) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-16 text-center">
+        <p className="text-2xl text-gray-500">Recipe not found.</p>
+        <Link to="/" className="btn-primary mt-4 inline-block">
+          Go Home
+        </Link>
+      </div>
+    );
+  }
 
-  const isAuthor = recipe.author?._id === currentUser.id;
+  const isAuthor = recipe?.author?._id?.toString() === currentUser?.id?.toString();
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Back button */}
-      <Link to="/" className="inline-flex items-center space-x-2 text-gray-500 hover:text-primary transition-colors mb-6">
+      <Link
+        to="/"
+        className="inline-flex items-center space-x-2 text-gray-500 hover:text-primary transition-colors mb-6"
+      >
         <ArrowLeft className="w-4 h-4" />
         <span>Back to recipes</span>
       </Link>
@@ -166,25 +243,27 @@ function Recipe() {
         <div className="relative h-80 md:h-96 bg-gray-200">
           {showVideo && recipe.video ? (
             <video
-              src={recipe.video}
               controls
               autoPlay
+              playsInline
+              preload="metadata"
               className="w-full h-full object-cover"
-              onEnded={() => setShowVideo(false)}
-            />
-          ) : recipe.image ? (
+            >
+              <source src={videoUrl} type="video/mp4" />
+              Your browser does not support the video tag.
+            </video>
+          ) : (
             <img
-              src={recipe.image}
+              src={imageUrl}
               alt={recipe.title}
               className="w-full h-full object-cover"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = PLACEHOLDER_IMAGE;
+              }}
             />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-orange-100 to-orange-300 flex items-center justify-center text-6xl">
-              🍽️
-            </div>
           )}
-          
-          {/* Video overlay */}
+
           {recipe.video && !showVideo && (
             <button
               onClick={() => setShowVideo(true)}
@@ -223,11 +302,20 @@ function Recipe() {
             )}
             <button
               onClick={() => {
-                navigator.share?.({
-                  title: recipe.title,
-                  text: recipe.description,
-                  url: window.location.href
-                }).catch(() => {});
+                if (navigator.share) {
+                  navigator
+                    .share({
+                      title: recipe.title,
+                      text: recipe.description,
+                      url: window.location.href,
+                    })
+                    .catch(() => {});
+                } else {
+                  navigator.clipboard
+                    .writeText(window.location.href)
+                    .then(() => alert('Recipe URL copied.'))
+                    .catch(() => alert('Could not copy URL.'));
+                }
               }}
               className="bg-white/90 backdrop-blur-sm p-2.5 rounded-full hover:bg-white transition-colors shadow-sm"
             >
@@ -246,16 +334,16 @@ function Recipe() {
               <div className="flex items-center space-x-4 mt-2">
                 <div className="flex items-center space-x-1">
                   <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
-                  <span className="font-semibold text-gray-700">
-                    {recipe.averageRating ? recipe.averageRating.toFixed(1) : 'No ratings'}
-                  </span>
+                  <span className="font-semibold text-gray-700">{displayRating}</span>
                   <span className="text-gray-400 text-sm">
                     ({recipe.ratings?.length || 0})
                   </span>
                 </div>
                 <span className="text-gray-300">|</span>
                 <div className="flex items-center space-x-1 text-gray-500">
-                  <Heart className={`w-4 h-4 ${isLiked ? 'fill-red-500 text-red-500' : ''}`} />
+                  <Heart
+                    className={`w-4 h-4 ${isLiked ? 'fill-red-500 text-red-500' : ''}`}
+                  />
                   <span>{likesCount}</span>
                 </div>
               </div>
@@ -288,7 +376,8 @@ function Recipe() {
                 <ChefHat className="w-4 h-4 text-primary" />
               </div>
               <span className="text-sm text-gray-600">
-                By <span className="font-semibold text-gray-800">
+                By{' '}
+                <span className="font-semibold text-gray-800">
                   {recipe.author?.name || 'Anonymous'}
                 </span>
               </span>
@@ -329,13 +418,15 @@ function Recipe() {
           </div>
 
           {/* Dietary preferences */}
-          {recipe.dietaryPreference && recipe.dietaryPreference.length > 0 && 
-           recipe.dietaryPreference[0] !== 'None' && (
+          {recipe.dietaryPreference?.length > 0 && recipe.dietaryPreference[0] !== 'None' && (
             <div className="py-4 border-b border-gray-100">
               <h3 className="text-lg font-bold text-gray-800 mb-2">Dietary Preferences</h3>
               <div className="flex flex-wrap gap-2">
                 {recipe.dietaryPreference.map((d) => (
-                  <span key={d} className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm font-medium">
+                  <span
+                    key={d}
+                    className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm font-medium"
+                  >
                     {d}
                   </span>
                 ))}
@@ -348,7 +439,10 @@ function Recipe() {
             <h3 className="text-lg font-bold text-gray-800 mb-3">Ingredients</h3>
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {recipe.ingredients?.map((ing, index) => (
-                <li key={index} className="flex items-center space-x-2 text-gray-700">
+                <li
+                  key={index}
+                  className="flex items-center space-x-2 text-gray-700"
+                >
                   <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
                   <span>
                     <span className="font-medium">{ing.name}</span>
